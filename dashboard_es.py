@@ -542,7 +542,7 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,san
   <div class="header-brand">
     <div>
       <div class="logo">ESTRADER<span></span> A.I. <span class="app-version">__VERSION_STRING__</span></div>
-      <div class="subtitle">S&amp;P 500 Spread Betting &mdash; Capital.com</div>
+      <div class="subtitle">S&amp;P 500 (23h Extended Hours) &mdash; Capital.com</div>
     </div>
   </div>
   <div class="header-price">
@@ -709,50 +709,34 @@ var PHASE_BOUNDS = [
   {name:'CLOSED',     end:22*60 + 0},    /* 21:00-22:00 maintenance */
   {name:'ASIAN',      end:24*60 + 0}     /* 22:00-24:00 reopen */
 ];
+/* ESTrader trades the US500 CFD ~23h/day. Phase-based countdown + GREEN/RED session
+   light: GREEN in ASIAN / PRE_MARKET / US_SESSION, RED only during the 21:00-22:00
+   daily maintenance break. Replaces USTrader's NYSE "US open in X" countdown. */
 function updateUsSession(){
   var openEl = document.getElementById('usOpenCountdown');
   var nextEl = document.getElementById('usNextPhase');
   if(!openEl && !nextEl) return;
   var now = new Date();
-  var nowSecs = now.getUTCHours()*3600 + now.getUTCMinutes()*60 + now.getUTCSeconds();
-  var openSecs = US_OPEN_MIN * 60;
-
-  if(openEl){
-    if(nowSecs < openSecs){
-      openEl.innerHTML = 'US open in <span>' + fmtHMS(openSecs - nowSecs) + '</span>';
-    } else if(nowSecs < 21*3600){
-      openEl.innerHTML = 'US market <span>OPEN</span>';
-    } else {
-      /* next open is tomorrow 14:30 */
-      var tillTomorrow = (24*3600 - nowSecs) + openSecs;
-      openEl.innerHTML = 'US open in <span>' + fmtHMS(tillTomorrow) + '</span>';
-    }
+  var t = now.getUTCHours()*3600 + now.getUTCMinutes()*60 + now.getUTCSeconds();  /* secs into UTC day */
+  function H(h,m){ return h*3600 + (m||0)*60; }
+  var GREEN = '&#128994;';   /* green circle */
+  var RED   = '&#128308;';   /* red circle */
+  var phase, nextName, secsToNext, light;
+  if(t >= H(21) && t < H(22)){                 /* 21:00-22:00 daily maintenance */
+    phase='MAINTENANCE'; light=RED; nextName=null; secsToNext=H(22)-t;
+  } else if(t >= H(13,30) && t < H(21)){        /* 13:30-21:00 */
+    phase='US_SESSION'; light=GREEN; nextName='MAINTENANCE'; secsToNext=H(21)-t;
+  } else if(t >= H(7) && t < H(13,30)){         /* 07:00-13:30 */
+    phase='PRE_MARKET'; light=GREEN; nextName='US_SESSION'; secsToNext=H(13,30)-t;
+  } else {                                      /* ASIAN 22:00-07:00 (wraps midnight) */
+    phase='ASIAN'; light=GREEN; nextName='PRE_MARKET';
+    secsToNext = (t >= H(22)) ? ((H(24)-t) + H(7)) : (H(7)-t);
   }
-
-  if(nextEl){
-    var nowMin = nowSecs / 60;
-    var nextName = 'CLOSED';
-    var nextEndSecs = null;
-    for(var i=0;i<PHASE_BOUNDS.length;i++){
-      if(nowMin < PHASE_BOUNDS[i].end){
-        nextName = PHASE_BOUNDS[i].name;
-        nextEndSecs = PHASE_BOUNDS[i].end * 60;
-        break;
-      }
-    }
-    if(nextEndSecs !== null){
-      var nextLabel = (nextName === PHASE_BOUNDS.length ? 'CLOSED' : '');
-      var following = 'CLOSED';
-      for(var j=0;j<PHASE_BOUNDS.length;j++){
-        if(PHASE_BOUNDS[j].name === nextName && j+1 < PHASE_BOUNDS.length){
-          following = PHASE_BOUNDS[j+1].name;
-        }
-      }
-      nextEl.innerHTML = 'Next phase (' + following.replace(/_/g,' ') + ') in <span>' + fmtHMS(nextEndSecs - nowSecs) + '</span>';
-    } else {
-      nextEl.innerHTML = 'Market closed &mdash; reopens 14:30 UTC';
-    }
-  }
+  var line = (phase==='MAINTENANCE')
+    ? ('MAINTENANCE ' + light + ' | Reopens in <span>' + fmtHMS(secsToNext) + '</span>')
+    : (phase + ' ' + light + ' | Next: ' + nextName + ' in <span>' + fmtHMS(secsToNext) + '</span>');
+  if(openEl){ openEl.innerHTML = line; }
+  if(nextEl){ nextEl.innerHTML = ''; }
 }
 setInterval(updateUsSession, 1000);
 
@@ -858,7 +842,7 @@ function buildLeftCol(trend1d, trend1h, signal5m, ind1d, ind1h, ind5m, phase, up
     '</div>' +
     '<div class="card" style="flex:1"><div class="card-title gold">US Session</div>' +
     '<div class="phase-badge phase-' + phaseCls + '">' + phaseLabel + '</div>' +
-    '<div class="us-open-line" id="usOpenCountdown">US open in <span>--:--:--</span></div>' +
+    '<div class="us-open-line" id="usOpenCountdown">Session <span>--:--:--</span></div>' +
     '<div class="us-open-line" id="usNextPhase" style="font-size:11px;color:var(--muted);"></div>' +
     '<div id="countdown" class="countdown" style="margin-top:8px;">Next update: --:--</div>' +
     '<div class="last-updated">Last updated: ' + (updatedAt || '--') + '</div>' +

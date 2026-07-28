@@ -1,3 +1,16 @@
+## [1.0.1] - 2026-07-28  —  Display fixes (23h session)
+### Fixed
+- SUBTITLE: "S&P 500 Spread Betting" -> "S&P 500 (23h Extended Hours) — Capital.com"
+  (was indistinguishable from USTrader).
+- SESSION LIGHT: green/ACTIVE in every trading phase (ASIAN/PRE_MARKET/US_SESSION);
+  red only during the 21:00-22:00 UTC daily maintenance break. Was inheriting
+  USTrader's NYSE-only "out of session" behaviour.
+- PHASE COUNTDOWN: replaced USTrader's "US open in HH:MM:SS" with a phase-based
+  countdown — "ASIAN 🟢 | Next: PRE_MARKET in HH:MM:SS", "US_SESSION 🟢 | Next:
+  MAINTENANCE in ...", "MAINTENANCE 🔴 | Reopens in ...", etc.
+- (RoundTable v1.1.4): ESTrader now shows its current 23h phase (IN SESSION green /
+  DAILY BREAK / WEEKEND) instead of "OUT OF SESSION" — dedicated "es" session kind.
+
 ## [1.0.0] - 2026-07-27  —  ESTrader launch (fork of USTrader + Merlin's Memory pilot)
 ### New system (port 5007, US500 CFD, £1000, £0.667/pt, 30pt stop / 45pt target)
 - **Forked from USTraderAI** (`_us` -> `_es` modules, port 5004 -> 5007, es_ CSVs).
