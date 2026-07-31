@@ -504,6 +504,30 @@ def run_candle_tick(
         proposed_direction=proposed_direction,
     )
 
+    # GUINEVERE 2.0 HIGH-ALERT active consultation (31 Jul 2026): a HIGH-confidence Guinevere
+    # signal may force an Arthur consult even when ONLY soft Lancelot checks block. The
+    # re-run relaxes ONLY the soft quality checks (SSL alignment / momentum / candle);
+    # safety checks + daily-trend + RSI + choppy are always enforced, so no risk control is
+    # bypassed. Arthur still needs >= 60 confidence to act (enforced after the decision).
+    guin_high_alert = False
+    _guin_alert_note = None
+    if (not checks["passed"]) and guinevere2 is not None and stanley.current_trade is None:
+        try:
+            _al, _favdir, _note = guinevere2.is_high_alert("US500")
+            if _al:
+                _relaxed = run_all_pre_checks(
+                    bar_1h=bar_1h, bar_5m=bar_5m, account=account,
+                    current_trade=stanley.current_trade, bar_1d=bar_1d,
+                    proposed_direction=_favdir, relax_soft=True)
+                if _relaxed["passed"]:
+                    checks = _relaxed
+                    guin_high_alert = True
+                    _guin_alert_note = _note
+                    proposed_direction = _favdir
+                    log.warning("GUINEVERE HIGH ALERT: soft checks relaxed (%s). %s", _favdir, _note)
+        except Exception as _e:
+            log.warning("Guinevere high-alert relaxation failed: %s", _e)
+
     if not checks["passed"]:
         log.info("Pre-checks FAILED: %s", checks.get("reason"))
         _push_dashboard(stanley, account, pre_checks=individual_checks,
@@ -547,6 +571,10 @@ def run_candle_tick(
             guin_advisory = guinevere2.get_advisory("US500")
         except Exception as _e:
             log.warning("Guinevere 2.0 failed: %s", _e)
+    # On a HIGH-alert relaxed consult, tell Arthur it is a Guinevere-forced consultation
+    # (soft checks relaxed, direction supplied, 60+ required).
+    if guin_high_alert and _guin_alert_note and guin_advisory:
+        guin_advisory = _guin_alert_note + "\n\n" + guin_advisory
 
     # Call Arthur
     decision = get_trading_decision(
@@ -576,6 +604,18 @@ def run_candle_tick(
             notify_memory_pattern(_pk)
     except Exception as _mexc:
         log.warning("memory logging failed: %s", _mexc)
+
+    # GUINEVERE HIGH-ALERT floor: on a relaxed (soft-check-bypassed) consult, require Arthur
+    # >= 60 confidence to enter -- a higher bar precisely because soft confirmation was relaxed.
+    if guin_high_alert and decision.get("decision") in ("ENTER_LONG", "ENTER_SHORT"):
+        try:
+            if float(decision.get("confidence") or 0) < 60:
+                log.warning("GUINEVERE HIGH ALERT: Arthur confidence %.0f < 60 on relaxed "
+                            "consult -- STAY_OUT.", float(decision.get("confidence") or 0))
+                decision["decision"] = "STAY_OUT"
+                decision["guinevere_high_alert_floor"] = True
+        except (TypeError, ValueError):
+            decision["decision"] = "STAY_OUT"
 
     log.info(format_decision_for_display(decision))
     _push_dashboard(stanley, account, decision=decision, pre_checks=individual_checks,
