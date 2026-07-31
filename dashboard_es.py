@@ -26,6 +26,24 @@ from pathlib import Path
 import pandas as pd
 from flask import Flask, Response, jsonify, request
 
+try:
+    import guinevere2   # Guinevere 2.0 directional news (Commission 018); fail-safe below
+except Exception:
+    guinevere2 = None
+
+
+def _guinevere2_panel():
+    """Compact Guinevere 2.0 signal dict for /api/state (reuses the shared 15-min cache).
+    Fail-safe -> NEUTRAL so the dashboard never errors on an API/key problem."""
+    if guinevere2 is None:
+        return {"signal": "NEUTRAL", "modifier": 0, "confidence": "NEUTRAL",
+                "primary_event": "-", "as_of": ""}
+    try:
+        return guinevere2.format_dashboard(guinevere2.get_signal("US500"))
+    except Exception:
+        return {"signal": "NEUTRAL", "modifier": 0, "confidence": "NEUTRAL",
+                "primary_event": "-", "as_of": ""}
+
 log = logging.getLogger("ESTrader.Dashboard")
 # ALBION STANDING RULE: all log timestamps are UTC (never BST/local). See main_estrader.py.
 logging.Formatter.converter = time.gmtime
@@ -972,6 +990,23 @@ function renderStayOutQuality(sq){
 }
 
 /* Right panel: System Status, pre-checks/checklist, US calendar */
+/* ── GUINEVERE 2.0 -- Macro Signal panel (Commission 018; from /api/state) ── */
+function renderGuin2Compact(g){
+  if(!g){ return ''; }
+  var sig = g.signal || 'NEUTRAL';
+  var col = sig==='BULLISH' ? 'var(--bull,#26a69a)' : (sig==='BEARISH' ? 'var(--bear,#ef5350)' : 'var(--muted,#888)');
+  var mod = (g.modifier>0?'+':'') + (g.modifier||0);
+  var ev = g.primary_event ? (' &middot; ' + g.primary_event) : '';
+  var mix = g.mixed ? ' (MIXED)' : '';
+  var t = (g.as_of||'').substring(11,16);
+  return '<div class="card" style="flex-shrink:0"><div class="card-title gold">GUINEVERE 2.0 &mdash; Macro Signal</div>'
+    + '<div style="font-size:13px;line-height:1.7;">'
+    + '<span style="color:' + col + ';font-weight:700;">' + sig + mix + '</span> '
+    + '<span style="color:var(--muted);">modifier ' + mod + ' on LONGs</span><br>'
+    + '<span style="color:var(--muted);font-size:11px;">' + (g.confidence||'') + ev + '</span><br>'
+    + '<span style="color:var(--muted);font-size:10px;">as of ' + (t||'--') + ' UTC</span>'
+    + '</div></div>';
+}
 function renderRightPanel(d){
   var mode = d.panel_mode || 'pre_checks';
 
@@ -1025,7 +1060,7 @@ function renderRightPanel(d){
 
   var soqHTML = renderSoqCompact(d.stay_out_quality);
 
-  return statusHTML + panelHTML + soqHTML + calHTML;
+  return statusHTML + panelHTML + soqHTML + renderGuin2Compact(d.guinevere2) + calHTML;
 }
 
 /* Page 1: trading dashboard */
@@ -1569,6 +1604,7 @@ def api_state():
         "trades":          trades,
         "monthly_stats":   monthly,
         "stay_out_quality": get_stay_out_quality(),
+        "guinevere2":      _guinevere2_panel(),
         "version_string":  VERSION_STRING,
     }
     # Merge in the 7 flat Lancelot/Arthur/locked-PnL fields (safe-defaulted).

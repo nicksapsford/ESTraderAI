@@ -87,6 +87,10 @@ from strategy_es        import should_force_close, DEFAULT_GBPUSD
 import phantom_tracker
 import benchmark_link
 import merlin_memory_es   # Merlin's Memory -- Arthur's episodic recall (ESTrader pilot)
+try:
+    import guinevere2                       # Guinevere 2.0 directional news (Commission 018)
+except Exception:
+    guinevere2 = None
 import regime_es   # market-regime reader (context only; NOT a gate)
 # NOTE (ESTrader, 27 Jul 2026): Morgan (performance_es) is REMOVED by design -- this
 # pilot tests Merlin's Memory alone. Only Lancelot pre-checks and the daily-loss kill
@@ -532,6 +536,18 @@ def run_candle_tick(
     # NOTE (ESTrader): no Morgan hard block here -- Morgan is removed by design. Arthur
     # is gated only by Lancelot pre-checks (above) and the daily-loss kill switch.
 
+    # Guinevere 2.0 -- directional macro intelligence for Arthur (Commission 018). Advises
+    # Arthur IN THE PROMPT (DECISION HIERARCHY) above the market data; Merlin's Memory stays
+    # inside the indicators block. Fail-safe: any failure yields a NEUTRAL advisory and never
+    # blocks the consult.
+    guin_advisory, guin_sig = None, None
+    if guinevere2 is not None:
+        try:
+            guin_sig = guinevere2.get_signal("US500")
+            guin_advisory = guinevere2.get_advisory("US500")
+        except Exception as _e:
+            log.warning("Guinevere 2.0 failed: %s", _e)
+
     # Call Arthur
     decision = get_trading_decision(
         bar_1h=bar_1h, bar_5m=bar_5m, current_price=us_price,
@@ -539,7 +555,18 @@ def run_candle_tick(
         current_trade=stanley.current_trade,
         calendar_context=cal_context, memory_context=memory_context,
         regime=regime, min_confidence=min_conf,
+        guinevere_advisory=guin_advisory,
     )
+
+    # Guinevere 2.0 signal logging for ongoing Gaius assessment (Commission 018): log the
+    # signal + Arthur's response so Gaius can score Guinevere 2.0's value over time.
+    if guinevere2 is not None and guin_sig is not None:
+        try:
+            guinevere2.log_decision(guin_sig,
+                                    arthur_decision=decision.get("decision", ""),
+                                    arthur_confidence_after=decision.get("confidence", ""))
+        except Exception as _e:
+            log.warning("Guinevere 2.0 logging failed: %s", _e)
 
     # Merlin's Memory: log this consultation (Gaius can later assess whether memory
     # improves decision quality) and fire Percival once on any brand-new n>=3 pattern.

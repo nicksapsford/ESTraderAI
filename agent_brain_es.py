@@ -128,6 +128,31 @@ CONFIDENCE CALIBRATION (your score MUST discriminate):
 A 35 on a clean 6/6 setup is WRONG; a 35 on a mixed setup is right. Force above 60 when all indicators agree.
 US-SPECIFIC: directional moves driven by macro/earnings/US-open flow. Clean setup = all SSL aligned + momentum (TMO/MACD) agree + RSI confirming = 65-75. Mixed signals on a volatile earnings/data day = 30-40.
 
+DECISION HIERARCHY -- HOW TO USE YOUR TOOLS (Guinevere 2.0, Commission 018)
+LEVEL 1 -- GUINEVERE 2.0 (highest priority WHEN ACTIVE). The GUINEVERE 2.0 -- MACRO
+INTELLIGENCE block (shown with the market data) is current real-world information your
+technical indicators cannot yet reflect -- news moves markets BEFORE indicators catch up.
+When Guinevere fires a HIGH or MEDIUM signal:
+  -> Trust Guinevere's DIRECTION over the daily SSL. The daily SSL reflects where price
+     HAS BEEN; Guinevere tells you where price IS GOING.
+  -> Reduce reliance on Money Flow and Chande MO -- on news days momentum FOLLOWS the news.
+  -> Your CORE ENTRY-TIMING indicators remain fully valid (see Level 2): they tell you WHEN
+     to enter; Guinevere tells you WHETHER the macro environment supports the trade.
+  -> Apply Guinevere's confidence modifier (capped +/-25) to your own score, in its
+     direction. If Guinevere is MIXED/uncertain, treat it as LOW conviction and lean
+     STAY_OUT unless Level 2 strongly agrees.
+When Guinevere is NEUTRAL: weight all indicators normally; the daily SSL keeps full weight.
+LEVEL 2 -- CORE INDICATORS (always valid): 1hr SSL, 5min SSL, RSI, TMO, MACD (and the
+  Efficiency Ratio where shown). These are your entry-timing tools regardless of news.
+LEVEL 3 -- SUPPORTING (context, not veto): daily SSL (overridden by an ACTIVE Guinevere),
+  Money Flow, Chande MO. Do NOT let these talk you out of a strong Guinevere + Level 2 combo.
+LEVEL 4 -- MORGAN (performance memory): context only; never overrides Guinevere + Level 2.
+GOLDEN RULE: strong Guinevere signal + aligned Level 2 = ENTER with conviction (65-80); do
+not let Level 3 or a quiet Morgan block a clear setup. AVOIDING PARALYSIS: Guinevere active
+-> follow Guinevere + Level 2; Guinevere neutral -> follow the majority of Level 2; still
+conflicted -> confidence 35-40 -> STAY_OUT. A confident wrong trade is worse than a
+cautious pass. (Per Principle 14, Guinevere is context + a capped modifier, never a filter.)
+
 HARD RULES -- NEVER VIOLATE
 1.  Trade the daily-SSL direction only. Daily BULL -> LONG; daily BEAR -> SHORT; daily
     NEUTRAL/unclear -> STAY_OUT. Never counter-trend the daily.
@@ -304,6 +329,7 @@ def get_trading_decision(
     memory_context: Optional[str] = None,
     regime: Optional[dict] = None,
     min_confidence=None,
+    guinevere_advisory: Optional[str] = None,
 ) -> dict:
     """
     Send indicator data to Arthur (Claude) and receive a trading decision.
@@ -315,6 +341,10 @@ def get_trading_decision(
         bar_1d, bar_1h, bar_5m, current_price, session_phase,
         current_trade, calendar_context, memory_context, regime, min_confidence,
     )
+    # Guinevere 2.0 advisory (Commission 018): prepend so Arthur reads the macro context
+    # ABOVE the market data. Merlin's Memory stays where it is (inside the indicators block).
+    if guinevere_advisory:
+        user_message = guinevere_advisory + "\n\n" + user_message
 
     for attempt in range(2):
         try:

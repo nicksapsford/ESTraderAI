@@ -1,3 +1,19 @@
+## [1.5.0] - 2026-07-31  —  Guinevere 2.0 directional news intelligence (Commission 018)
+### Added
+- Vendored the shared **`guinevere2/`** package (directional macro-news engine) verbatim
+  from the desk reference. One consult per Arthur tick fetches a net directional signal for
+  `US500` (Alpha Vantage NEWS_SENTIMENT, cached 15 min), fully fail-safe -> NEUTRAL on any
+  error, and never blocks a trading tick.
+- `agent_brain_es.py`: added the **DECISION HIERARCHY** block to Arthur's system prompt
+  (Guinevere = Level 1 when active, capped +/-25 context modifier, never a filter) and a new
+  `guinevere_advisory` param prepended ABOVE the market data. Merlin's Memory is untouched —
+  it stays inside the indicators block; Guinevere sits above it.
+- `main_estrader.py`: fetch Guinevere advisory/signal before the Arthur consult, pass the
+  advisory into the prompt, and log every signal + Arthur's response to `guinevere2_log.csv`
+  for ongoing Gaius assessment. Purely additive — ESTrader had no legacy news feed.
+- `dashboard_es.py`: added a **GUINEVERE 2.0 — Macro Signal** panel (signal colour,
+  modifier, primary event, last-updated) fed by a new `/api/state` `guinevere2` field.
+
 ## [1.0.1] - 2026-07-28  —  Display fixes (23h session)
 ### Fixed
 - SUBTITLE: "S&P 500 Spread Betting" -> "S&P 500 (23h Extended Hours) — Capital.com"
