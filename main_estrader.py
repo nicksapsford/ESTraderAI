@@ -20,7 +20,8 @@ from dotenv import load_dotenv
 # ── Config ────────────────────────────────────────────────────────────────────
 
 PAPER_TRADING_MODE = True
-VERSION            = "1.8.0"
+VERSION            = ((Path(__file__).resolve().parent / "VERSION").read_text().strip()
+                      if (Path(__file__).resolve().parent / "VERSION").exists() else "1.5.2")
 CANDLE_INTERVAL    = 300      # 5-minute candle loop (seconds)
 POSITION_INTERVAL  = 30       # position monitoring (seconds)
 HEARTBEAT_INTERVAL = 240      # emit a liveness log at least this often, even when idle

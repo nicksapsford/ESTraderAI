@@ -15,14 +15,15 @@ US500 mechanics (matched to strategy_es / pre_checks_es):
   Trailing stop      = 30 points
   Take-profit ceiling= 200 points
   Spread cost        = 0.6 pt/trade (constant across configs, for realism only)
-  No overnight       = force close at 20:45 UTC
+  No overnight       = force close at 20:55 UTC
 
-Session model (LIVE boundaries from data_feed_es.get_session_phase, all UTC):
-  PRE_MARKET 13:30-14:30  -- warming up, no entries
-  US_OPEN    14:30-14:45  -- opening volatility, no entries
-  CORE       14:45-20:00  -- main trading window (entries allowed here)
-  LATE       20:00-20:45  -- manage open trades only, no new entries
-  CLOSED     otherwise    -- force close at 20:45
+Session model (LIVE 23h boundaries from data_feed_es.get_session_phase, all UTC).
+Updated 1 Aug 2026 -- ESTrader runs a ~23h session, NOT NYSE-cash-only:
+  ASIAN      22:00-07:00  -- overnight, lower volume (tradeable)
+  PRE_MARKET 07:00-13:30  -- pre-US incl. European morning (tradeable)
+  US_SESSION 13:30-21:00  -- NYSE hours, prime liquidity (tradeable)
+  CLOSED     21:00-22:00  -- daily maintenance + weekend (Fri 21:00 -> Sun 22:00)
+  Force close all open trades at 20:55 UTC, before the 21:00 maintenance break.
 
 The two configurations differ ONLY in the 1h RSI veto thresholds:
   BASELINE (live) : LONG needs 1h RSI >= 55,  SHORT needs 1h RSI <= 45
@@ -77,21 +78,21 @@ CHOPPY_SIGNALS_REQUIRED = 2
 
 # ── Session phase constants (mirror data_feed_es, all UTC) ─────────────────────
 
+ASIAN      = "ASIAN"
 PRE_MARKET = "PRE_MARKET"
-US_OPEN    = "US_OPEN"
-CORE       = "CORE"
-LATE       = "LATE"
+US_SESSION = "US_SESSION"
 CLOSED     = "CLOSED"
 
-_PRE_MARKET_START = 13 * 60 + 30   # 810
-_US_OPEN_START    = 14 * 60 + 30   # 870
-_CORE_START       = 14 * 60 + 45   # 885
-_LATE_START       = 20 * 60        # 1200
-_FORCE_CLOSE      = 20 * 60 + 45   # 1245  -- CLOSED begins; force close all
+# Live 23h session boundaries (mirror data_feed_es.get_session_phase, all UTC).
+_ASIAN_END   = 7 * 60          # 420   -- 07:00, ASIAN -> PRE_MARKET
+_US_START    = 13 * 60 + 30    # 810   -- 13:30, PRE_MARKET -> US_SESSION
+_MAINT_START = 21 * 60         # 1260  -- 21:00, US_SESSION -> CLOSED (daily break)
+_REOPEN      = 22 * 60         # 1320  -- 22:00, CLOSED -> ASIAN (daily + Sunday reopen)
+_FORCE_CLOSE = 20 * 60 + 55    # 1255  -- 20:55, force close before the 21:00 maintenance
 
-# Only CORE takes new entries (matches pre_checks_es intent: CORE tradeable,
-# LATE manage-only, US_OPEN volatility block, near-close block after 20:45).
-TRADEABLE_PHASES = {CORE}
+# ESTrader trades the ~23h session: ALL phases except CLOSED are tradeable (Lancelot
+# gates entries per phase). Replaces the stale NYSE-cash-only CORE-only model.
+TRADEABLE_PHASES = {ASIAN, PRE_MARKET, US_SESSION}
 
 # The two RSI-veto configurations under test.
 CONFIGS = [
@@ -189,20 +190,27 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
 # ── Session phase logic (mirror data_feed_es.get_session_phase, UTC) ───────────
 
 def get_session_phase(ts_utc) -> str:
-    """Return the US session phase for a UTC-aware pandas Timestamp."""
-    if ts_utc.weekday() >= 5:
+    """Return the ES 23h session phase for a UTC-aware pandas Timestamp
+    (mirrors data_feed_es.get_session_phase, incl. weekend/Fri/Sun handling)."""
+    wd = ts_utc.weekday()
+    t  = ts_utc.hour * 60 + ts_utc.minute
+    if wd == 5:                                   # Saturday -- closed
         return CLOSED
-    t = ts_utc.hour * 60 + ts_utc.minute
-    if   t < _PRE_MARKET_START: return CLOSED
-    elif t < _US_OPEN_START:    return PRE_MARKET
-    elif t < _CORE_START:       return US_OPEN
-    elif t < _LATE_START:       return CORE
-    elif t < _FORCE_CLOSE:      return LATE
-    else:                       return CLOSED
+    if wd == 6:                                   # Sunday -- opens 22:00 (ASIAN)
+        return ASIAN if t >= _REOPEN else CLOSED
+    if wd == 4 and t >= _MAINT_START:             # Friday from 21:00 -> weekend closed
+        return CLOSED
+    if _MAINT_START <= t < _REOPEN:               # 21:00-22:00 daily maintenance
+        return CLOSED
+    if t >= _REOPEN or t < _ASIAN_END:            # 22:00-07:00 overnight
+        return ASIAN
+    if t < _US_START:                             # 07:00-13:30 pre-US
+        return PRE_MARKET
+    return US_SESSION                             # 13:30-21:00 NYSE hours
 
 
 def _is_force_close(ts_utc) -> bool:
-    """Force close at/after 20:45 UTC (mirror strategy_es.should_force_close)."""
+    """Force close at/after 20:55 UTC (mirror strategy_es.should_force_close)."""
     t = ts_utc.hour * 60 + ts_utc.minute
     return t >= _FORCE_CLOSE
 
@@ -505,7 +513,7 @@ def run_single_backtest(name: str, long_min: float, short_max: float,
                 max_dd_gbp  = max(max_dd_gbp, equity_peak - capital)
             continue   # never seek entries while a trade is active
 
-        # ── Entry gate (CORE only) ─────────────────────────────────────────────
+        # ── Entry gate (tradeable phases only: ASIAN/PRE_MARKET/US_SESSION) ─────
         if phase not in TRADEABLE_PHASES:
             continue
 
@@ -577,7 +585,7 @@ def _compute_stats(name: str, long_min: float, short_max: float,
 
     by_session = {
         ph: _dir_stats([t for t in completed if t.session == ph])
-        for ph in (CORE, LATE)
+        for ph in (ASIAN, PRE_MARKET, US_SESSION)
     }
 
     period_days = max((df_5m.index[-1] - df_5m.index[0]).days, 1)
@@ -657,7 +665,7 @@ def build_comparison_lines(baseline: dict, relaxed: dict,
     L.append(f"  Account : GBP {STARTING_CAPITAL_GBP:.0f}  |  stake GBP {STAKE_PER_POINT_GBP:.2f}/pt"
              f"  |  stop {STOP_POINTS:.0f}pt  |  TP {TP_POINTS:.0f}pt"
              f"  |  spread {SPREAD_COST_PTS:.1f}pt")
-    L.append(f"  Entries : CORE only (14:45-20:00 UTC) | force close 20:45 UTC")
+    L.append(f"  Entries : all phases except CLOSED (ASIAN/PRE_MARKET/US_SESSION) | force close 20:55 UTC")
     L.append(sep)
     L.append(_fmt_row("", "BASELINE (55/45)", "RELAXED (52/48)"))
     L.append("  " + "-" * 74)
@@ -670,7 +678,7 @@ def build_comparison_lines(baseline: dict, relaxed: dict,
     L.append(_fmt_row("  SHORT trades / win rate",
                       f"{baseline['short']['count']} / {baseline['short']['win_rate']:.1f}%",
                       f"{relaxed['short']['count']} / {relaxed['short']['win_rate']:.1f}%"))
-    for ph in (CORE, LATE):
+    for ph in (ASIAN, PRE_MARKET, US_SESSION):
         b = baseline["by_session"][ph]
         r = relaxed["by_session"][ph]
         L.append(_fmt_row(f"  {ph} trades / win rate",
