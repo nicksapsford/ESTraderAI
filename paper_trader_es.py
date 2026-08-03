@@ -38,6 +38,9 @@ CSV_HEADERS = [
     "exit_daily_ssl", "exit_1h_ssl", "exit_5m_ssl",
     "exit_tmo", "exit_money_flow", "exit_rsi", "exit_chande_mo", "exit_confidence",
     "price_30m_after", "price_60m_after", "recovered_30m", "recovered_60m",
+    # ── NEWS FAST PATH (Architecture B, 3 Aug 2026) ── set on entries taken via the Uther
+    # HIGH-alert relaxed consult, so Gaius can score fast-path vs normal-path trades separately.
+    "fast_path", "fast_path_trigger", "fast_path_uther_confidence",
 ]
 
 # The 12 analytics columns above, in order -- used by _migrate_csv and blank-fill.
@@ -197,6 +200,9 @@ class PaperTraderES:
             "entry_time":        entry_t.strftime("%Y-%m-%d %H:%M:%S"),
             "exit_time":         exit_t.strftime("%Y-%m-%d %H:%M:%S"),
             "session_phase":     trade.session_phase,
+            "fast_path":         "TRUE" if getattr(trade, "fast_path", False) else "FALSE",
+            "fast_path_trigger": getattr(trade, "fast_path_trigger", "") or "",
+            "fast_path_uther_confidence": getattr(trade, "fast_path_uther_confidence", "") or "",
         })
         # ARTHUR_EXIT analytics: indicator snapshot + Arthur's exit confidence (Comm 012).
         if exit_meta:
@@ -310,10 +316,16 @@ class PaperTraderES:
         return sum(t.pnl_gbp for t in self.trade_history if t.pnl_gbp is not None)
 
     def open_trade(self, direction: str, price: float, session_phase: str = "",
-                   gbpusd_rate: float = DEFAULT_GBPUSD) -> USTrade:
+                   gbpusd_rate: float = DEFAULT_GBPUSD,
+                   fast_path: bool = False, fast_path_trigger: str = "",
+                   fast_path_uther_confidence: str = "") -> USTrade:
         """Open a new paper trade and log it."""
         from strategy_es import open_trade
         self.current_trade = open_trade(direction, price, session_phase, gbpusd_rate=gbpusd_rate)
+        # News fast path tagging (Architecture B): persists to the trade row at close.
+        self.current_trade.fast_path = bool(fast_path)
+        self.current_trade.fast_path_trigger = (fast_path_trigger or "")[:160]
+        self.current_trade.fast_path_uther_confidence = fast_path_uther_confidence or ""
         self._save_state()
         log.info(
             "[OPEN] %s | entry=%.1f | stake=£%.2f/pt | stop=%.1f | target=%.1f",

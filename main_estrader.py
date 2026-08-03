@@ -606,12 +606,13 @@ def run_candle_tick(
     except Exception as _mexc:
         log.warning("memory logging failed: %s", _mexc)
 
-    # GUINEVERE HIGH-ALERT floor: on a relaxed (soft-check-bypassed) consult, require Arthur
-    # >= 60 confidence to enter -- a higher bar precisely because soft confirmation was relaxed.
+    # NEWS FAST PATH floor (Architecture B, 3 Aug 2026): on a relaxed (soft-check-bypassed)
+    # consult, require Arthur >= 65 confidence to enter -- a higher bar (was 60) precisely
+    # because soft confirmation was relaxed. Extra 5 points compensates for the relaxed checks.
     if guin_high_alert and decision.get("decision") in ("ENTER_LONG", "ENTER_SHORT"):
         try:
-            if float(decision.get("confidence") or 0) < 60:
-                log.warning("GUINEVERE HIGH ALERT: Arthur confidence %.0f < 60 on relaxed "
+            if float(decision.get("confidence") or 0) < 65:
+                log.warning("UTHER HIGH ALERT: Arthur confidence %.0f < 65 on relaxed "
                             "consult -- STAY_OUT.", float(decision.get("confidence") or 0))
                 decision["decision"] = "STAY_OUT"
                 decision["guinevere_high_alert_floor"] = True
@@ -632,6 +633,17 @@ def run_candle_tick(
     except (TypeError, ValueError):
         _conf = 0.0
 
+    # News fast path (Architecture B): tag entries taken via the Uther HIGH-alert relaxed
+    # consult + log every fast-path consult (entry or stay-out) for the Uther dashboard/Gaius.
+    _fp_trigger = ""
+    if guin_high_alert:
+        _fp_trigger = ((guin_sig or {}).get("uther_reasoning")
+                       or (guin_sig or {}).get("primary_event") or "")[:160]
+        try:
+            _log_fast_path("US500", proposed_direction, action, decision.get("confidence"), _fp_trigger)
+        except Exception as _fe:
+            log.warning("fast-path log failed: %s", _fe)
+
     if action == "ENTER_LONG" and not stanley.in_trade:
         # Bidirectional (23 Jul 2026): LONG and SHORT share one confidence bar
         # (ARTHUR_MIN_CONFIDENCE_BULL); regime no longer raises/lowers it.
@@ -640,14 +652,16 @@ def run_candle_tick(
                      _conf, min_conf, regime.get("regime"))
             action = "STAY_OUT"
         else:
-            _open_trade(stanley, account, ig, "LONG", us_price, phase, gbpusd)
+            _open_trade(stanley, account, ig, "LONG", us_price, phase, gbpusd,
+                        fast_path=guin_high_alert, fast_path_trigger=_fp_trigger)
     elif action == "ENTER_SHORT" and not stanley.in_trade:
         # Bidirectional (23 Jul 2026): SHORTs take the SAME confidence bar as LONGs.
         if _conf < min_conf:
             log.info("SHORT blocked -- confidence %.0f below threshold %d", _conf, min_conf)
             action = "STAY_OUT"
         else:
-            _open_trade(stanley, account, ig, "SHORT", us_price, phase, gbpusd)
+            _open_trade(stanley, account, ig, "SHORT", us_price, phase, gbpusd,
+                        fast_path=guin_high_alert, fast_path_trigger=_fp_trigger)
     elif action == "EXIT" and stanley.in_trade:
         # Gaius Commission 012: capture the indicator snapshot + Arthur's exit confidence
         # so we can later judge whether the early exit was skill or premature.
@@ -718,8 +732,32 @@ def monitor_open_position(
 
 # ── Open / close helpers ──────────────────────────────────────────────────────
 
-def _open_trade(stanley, account, ig, direction, price, phase, gbpusd):
-    trade = stanley.open_trade(direction, price, phase, gbpusd_rate=gbpusd)
+def _log_fast_path(market, direction, arthur_decision, arthur_confidence, trigger) -> None:
+    """Append a row to logs/fast_path_log.csv for every Uther HIGH-alert (fast-path) consult --
+    the source for the Uther dashboard fast-path panel + Gaius separate assessment. UTC."""
+    import csv as _csv
+    path = LOG_DIR / "fast_path_log.csv"
+    hdr = ["timestamp_utc", "market", "direction", "arthur_decision",
+           "arthur_confidence", "entered", "uther_confidence", "trigger"]
+    entered = "TRUE" if arthur_decision in ("ENTER_LONG", "ENTER_SHORT") else "FALSE"
+    row = {"timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+           "market": market, "direction": direction or "",
+           "arthur_decision": arthur_decision or "STAY_OUT",
+           "arthur_confidence": arthur_confidence if arthur_confidence is not None else "",
+           "entered": entered, "uther_confidence": "HIGH", "trigger": (trigger or "")[:160]}
+    exists = path.exists()
+    with open(path, "a", newline="", encoding="utf-8") as f:
+        w = _csv.DictWriter(f, fieldnames=hdr)
+        if not exists:
+            w.writeheader()
+        w.writerow(row)
+
+
+def _open_trade(stanley, account, ig, direction, price, phase, gbpusd,
+                fast_path=False, fast_path_trigger=""):
+    trade = stanley.open_trade(direction, price, phase, gbpusd_rate=gbpusd,
+                               fast_path=fast_path, fast_path_trigger=fast_path_trigger,
+                               fast_path_uther_confidence=("HIGH" if fast_path else ""))
     if PAPER_TRADING_MODE:
         log.info("[PAPER] OPEN %s | entry=%.1f | stop=%.1f | target=%.1f | stake=£%.2f/pt",
                  direction, price, trade.stop_loss, trade.take_profit, trade.stake)
