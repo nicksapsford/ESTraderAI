@@ -347,6 +347,9 @@ EXIT when in position:
   5m SSL reverses AND RSI crosses 50 (both required)
   OR force close signal at 20:55 UTC
 
+RESPONSE LENGTH (be economical): respond in under 200 words. The JSON "reasoning" field
+must be 2-3 sentences maximum and "warnings" brief. Do not pad -- return tight JSON only.
+
 REQUIRED OUTPUT -- valid JSON only. No markdown, no preamble.
 {
   "decision": "ENTER_LONG | ENTER_SHORT | HOLD | EXIT | STAY_OUT",
@@ -526,7 +529,7 @@ def get_trading_decision(
         try:
             response = client.messages.create(
                 model      = "claude-sonnet-4-6",
-                max_tokens = 2000,
+                max_tokens = 800,
                 system     = [{"type": "text", "text": SYSTEM_PROMPT,
                                "cache_control": {"type": "ephemeral"}}],
                 messages   = [{"role": "user", "content": user_message}],
