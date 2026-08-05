@@ -1575,7 +1575,7 @@ def api_state():
 
     payload = {
         "mode":            s.get("mode", "PAPER"),
-        "version":         s.get("version", APP_VERSION),
+        "version":         APP_VERSION,
         "epic":            s.get("epic", "US500"),
         "phase":           s.get("phase", "--"),
         "us_level":        s.get("us_level", 0.0),
