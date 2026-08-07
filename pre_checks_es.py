@@ -63,6 +63,76 @@ def _fail(reason: str, block_direction: str = "BOTH") -> dict:
     return {"passed": False, "reason": reason, "block_direction": block_direction, "decision": "STAY_OUT"}
 
 
+# ── High-impact scheduled-event block (ESTrader v1.10.5, Commission 022 / FOMC-NFP brief 7 Aug 2026) ──
+# BYTE-IDENTICAL calendar to USBase (Rule 18: any protection on one US500 system applies to all).
+# Hardcoded 2026 calendar (no live-feed dependency); blocks NEW entries around NFP/FOMC/CPI/GDP/ADP.
+# Open positions are UNAFFECTED (entry gate only; monitor manages open trades). REVIEW/UPDATE Jan 2027.
+HIGH_IMPACT_EVENTS = [
+    # NFP -- Non-Farm Payrolls (first Friday), 13:30 UTC
+    {"name": "NFP",  "date": "2026-08-07", "time_utc": "13:30"},
+    {"name": "NFP",  "date": "2026-09-04", "time_utc": "13:30"},
+    {"name": "NFP",  "date": "2026-10-02", "time_utc": "13:30"},
+    {"name": "NFP",  "date": "2026-11-06", "time_utc": "13:30"},
+    {"name": "NFP",  "date": "2026-12-04", "time_utc": "13:30"},
+    # FOMC -- rate decision, 19:00 UTC (presser 19:30)
+    {"name": "FOMC", "date": "2026-09-17", "time_utc": "19:00"},
+    {"name": "FOMC", "date": "2026-10-29", "time_utc": "19:00"},
+    {"name": "FOMC", "date": "2026-12-10", "time_utc": "19:00"},
+    # CPI -- Consumer Price Index, 13:30 UTC
+    {"name": "CPI",  "date": "2026-08-12", "time_utc": "13:30"},
+    {"name": "CPI",  "date": "2026-09-10", "time_utc": "13:30"},
+    {"name": "CPI",  "date": "2026-10-13", "time_utc": "13:30"},
+    {"name": "CPI",  "date": "2026-11-12", "time_utc": "13:30"},
+    {"name": "CPI",  "date": "2026-12-11", "time_utc": "13:30"},
+    # GDP -- Advance GDP (quarterly), 13:30 UTC
+    {"name": "GDP",  "date": "2026-10-29", "time_utc": "13:30"},
+    # ADP Employment, 13:15 UTC
+    {"name": "ADP",  "date": "2026-08-05", "time_utc": "13:15"},
+    {"name": "ADP",  "date": "2026-09-02", "time_utc": "13:15"},
+    {"name": "ADP",  "date": "2026-10-07", "time_utc": "13:15"},
+    {"name": "ADP",  "date": "2026-11-04", "time_utc": "13:15"},
+    {"name": "ADP",  "date": "2026-12-02", "time_utc": "13:15"},
+]
+
+EVENT_BLOCK_MINUTES = {
+    "FOMC": {"before": 60, "after": 90},   # most volatile
+    "NFP":  {"before": 30, "after": 90},   # very volatile
+    "CPI":  {"before": 30, "after": 60},   # significant
+    "GDP":  {"before": 30, "after": 60},   # significant
+    "ADP":  {"before": 15, "after": 45},   # moderate
+}
+
+
+def _parse_event_windows():
+    """Pre-parse the calendar once into (name, date, time, window_start, window_end) UTC tuples."""
+    out = []
+    for ev in HIGH_IMPACT_EVENTS:
+        try:
+            dt = datetime.strptime(f"{ev['date']} {ev['time_utc']}", "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
+        except Exception:
+            log.warning("Bad event calendar entry skipped: %s", ev)
+            continue
+        b = EVENT_BLOCK_MINUTES.get(ev["name"], {"before": 30, "after": 60})
+        out.append((ev["name"], ev["date"], ev["time_utc"],
+                    dt - timedelta(minutes=b["before"]), dt + timedelta(minutes=b["after"])))
+    return out
+
+
+_EVENT_WINDOWS = _parse_event_windows()
+
+
+def check_event_block(now_utc: Optional[datetime] = None) -> dict:
+    """Block NEW entries within the block window of any high-impact scheduled event. New entries only --
+    open positions run normally (entry gate; no force-close). PASS if clear of all events."""
+    if now_utc is None:
+        now_utc = datetime.now(timezone.utc)
+    for name, date, time_utc, start, end in _EVENT_WINDOWS:
+        if start <= now_utc <= end:
+            return _fail("EVENT BLOCK: %s %s %s UTC -- no new entries (%s-%s UTC window)." % (
+                name, date, time_utc, start.strftime("%H:%M"), end.strftime("%H:%M")))
+    return _pass()
+
+
 def _trigger_kill_switch(account, reason: str) -> dict:
     """Tiered kill switch. 1st trigger = 6h wait; 2nd = 12h; 3rd+ = 24h."""
     now    = datetime.now(timezone.utc)
@@ -361,6 +431,7 @@ def run_all_pre_checks(
         ("Market open",         lambda: check_market_open()),
         ("Not near close",      lambda: check_near_close()),
         ("US open volatility",  lambda: check_us_open_volatility()),
+        ("Event block",         lambda: check_event_block()),
     ]
     for name, fn in safety_checks:
         result = fn()
